@@ -14,6 +14,7 @@ import {
   Video,
   Wand2,
   ChevronRight,
+  Magnet, // 引入磁铁图标
 } from "lucide-react";
 import { useState, useRef, useEffect, ChangeEvent } from "react";
 
@@ -44,14 +45,19 @@ export const Toolbar = ({ isSidebarOpen }: ToolbarProps) => {
     [editor]
   );
 
+  // [修复] 监听吸附模式状态：使用 editor.user.isSnapMode
+  const isSnapMode = useValue(
+    "isSnapMode",
+    () => editor.user.getIsSnapMode(),
+    [editor]
+  );
+
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showShapeMenu, setShowShapeMenu] = useState(false);
 
   const addMenuRef = useRef<HTMLDivElement | null>(null);
   const shapeMenuRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -70,21 +76,30 @@ export const Toolbar = ({ isSidebarOpen }: ToolbarProps) => {
   // A 键占位
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
+      const target = e.target as HTMLElement;
       if (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        (e.target as HTMLElement)?.isContentEditable
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
       ) {
         return;
       }
       if (e.key.toLowerCase() === "a") {
+        // 防止与 tldraw 内部快捷键冲突，可以先阻止冒泡
+        // e.stopPropagation(); 
         alert("AI 图像功能即将上线（占位）");
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  // [修复] 切换吸附模式
+  const toggleSnapMode = () => {
+    editor.user.updateUserPreferences({
+      isSnapMode: !isSnapMode,
+    });
+  };
 
   const ToolButton = ({
     active,
@@ -157,17 +172,14 @@ export const Toolbar = ({ isSidebarOpen }: ToolbarProps) => {
     const images = await Promise.all(files.map(readImageFile));
     const spacing = 40;
 
-    // 1. 计算放置位置：优先放在当前视图中心，而不是整个页面的中心
+    // 计算放置位置：优先放在当前视图中心
     const viewport = editor.getViewportPageBounds();
     let startX: number;
     let centerY: number;
 
-    // 如果想放在已有内容右侧，保留原逻辑；
-    // 但通常用户更喜欢把图片放在"眼皮底下"（当前视图中心）
-    // 为了稳妥，这里还是保留你的"放在最右侧"逻辑，但确保基于页面边界计算正确
     const pageBounds = editor.getCurrentPageBounds();
     if (pageBounds) {
-      startX = pageBounds.maxX + 100; // 稍微多留点空隙
+      startX = pageBounds.maxX + 100;
       centerY = (pageBounds.minY + pageBounds.maxY) / 2;
     } else {
       startX = viewport.center.x;
@@ -215,21 +227,20 @@ export const Toolbar = ({ isSidebarOpen }: ToolbarProps) => {
       currentX += img.w + spacing;
     }
 
-    // 2. 批量创建
+    // 批量创建
     editor.createAssets(assets as any);
     editor.createShapes(shapes as any);
     
-    // 3. 选中新图片
+    // 选中新图片
     editor.select(...newShapeIds);
 
-    // ⭐ 关键修改：使用 setTimeout 强制等待 React/Tldraw 渲染循环完成
-    // 之前不准确是因为图形刚创建，编辑器的“空间索引”还没更新，不知道它们在哪
+    // 等待渲染循环完成，缩放到选中内容
     setTimeout(() => {
       editor.zoomToSelection({
-        animation: { duration: 400 }, // 动画时间
-        inset: 0.2, // 留白比例 (20%)，防止图片贴着屏幕边缘
+        animation: { duration: 400 },
+        inset: 0.2,
       });
-    }, 100); // 100ms 的延迟通常足以解决所有竞态条件
+    }, 100);
 
     e.target.value = "";
     setShowAddMenu(false);
@@ -293,12 +304,12 @@ export const Toolbar = ({ isSidebarOpen }: ToolbarProps) => {
         onChange={handleUploadImage}
       />
 
-      {/* ⭐ 左侧主工具栏 - 自动视觉居中 */}
+      {/* 左侧主工具栏 */}
       <div
         style={{
           position: "absolute",
-          top: "50%", // 改成这个，强制垂直居中
-          transform: "translateY(-50%)", // 配合这个属性，达成完美的中心对齐
+          top: "50%",
+          transform: "translateY(-50%)",
           left: isSidebarOpen ? 40 : 24,
           zIndex: 200,
           pointerEvents: "all",
@@ -330,6 +341,15 @@ export const Toolbar = ({ isSidebarOpen }: ToolbarProps) => {
             onClick={() => editor.setCurrentTool("hand")}
           >
             <Hand size={20} />
+          </ToolButton>
+
+          {/* 吸附对齐开关 */}
+          <ToolButton
+            active={!!isSnapMode} // 确保转换为 boolean，防止 null 导致渲染错误
+            title={`吸附对齐 (${isSnapMode ? "开启" : "关闭"})`}
+            onClick={toggleSnapMode}
+          >
+            <Magnet size={20} />
           </ToolButton>
 
           {/* 图形菜单 */}

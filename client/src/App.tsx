@@ -61,6 +61,8 @@ function App() {
     editorInstance.setCameraOptions({
         minZoom: 0.01, maxZoom: 100, zoomSteps: 1.05
     })
+    // 默认打开 tldraw 内置的吸附对齐能力（贴边、中心/角点吸附）
+    editorInstance.user.updateUserPreferences({ isSnapMode: true })
     
     // 异步加载数据
     setTimeout(async () => {
