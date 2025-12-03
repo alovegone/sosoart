@@ -1,334 +1,525 @@
-import { useEditor, useValue, createShapeId, GeoShapeGeoStyle } from 'tldraw'
-import { 
-  MousePointer2, Square, Circle, Triangle, Minus, ArrowRight, // 图形图标
-  Type, Pen, Plus, 
-  Image as ImageIcon, Video, Wand2, LayoutGrid, ChevronRight
-} from 'lucide-react'
-import { useState, useRef, useEffect } from 'react'
+import { useEditor, useValue, createShapeId, GeoShapeGeoStyle } from "tldraw";
+import {
+  MousePointer2,
+  Hand,
+  Square,
+  Circle,
+  Triangle,
+  Minus,
+  ArrowRight,
+  Type,
+  Pen,
+  Plus,
+  Image as ImageIcon,
+  Video,
+  Wand2,
+  ChevronRight,
+} from "lucide-react";
+import { useState, useRef, useEffect, ChangeEvent } from "react";
 
-export const Toolbar = ({ isSidebarOpen }: { isSidebarOpen: boolean }) => {
-  const editor = useEditor()
-  
-  // 两个菜单的状态
-  const [showAddMenu, setShowAddMenu] = useState(false)
-  const [showShapeMenu, setShowShapeMenu] = useState(false) // 新增：图形菜单状态
+type ToolbarProps = {
+  isSidebarOpen: boolean;
+};
 
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  
-  // Refs 用于点击外部关闭检测
-  const addMenuRef = useRef<HTMLDivElement>(null)
-  const addButtonRef = useRef<HTMLButtonElement>(null)
-  const shapeMenuRef = useRef<HTMLDivElement>(null)
-  const shapeButtonRef = useRef<HTMLButtonElement>(null)
+type UploadedImageInfo = {
+  src: string;
+  w: number;
+  h: number;
+  name: string;
+  type: string;
+};
 
-  const currentTool = useValue('tool', () => editor ? editor.getCurrentToolId() : 'select', [editor])
+export const Toolbar = ({ isSidebarOpen }: ToolbarProps) => {
+  const editor = useEditor();
 
-  // --- 核心：切换图形类型 ---
-  const handleSelectShape = (tool: string, geoType?: string) => {
-    editor.setCurrentTool(tool)
-    
-    // 如果是几何图形 (geo)，需要进一步设置具体的形状样式
-    if (tool === 'geo' && geoType) {
-        editor.setStyleForNextShapes(GeoShapeGeoStyle, geoType)
-    }
-    
-    setShowShapeMenu(false)
-  }
+  const currentToolId = useValue(
+    "currentTool",
+    () => editor.getCurrentToolId(),
+    [editor]
+  );
 
-  // --- 点击外部自动关闭所有菜单 ---
+  const geoShapeStyle = useValue(
+    "geoStyle",
+    () => editor.getStyleForNextShape(GeoShapeGeoStyle),
+    [editor]
+  );
+
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [showShapeMenu, setShowShapeMenu] = useState(false);
+
+  const addMenuRef = useRef<HTMLDivElement | null>(null);
+  const shapeMenuRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+
+
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-        const target = event.target as Node
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (addMenuRef.current && !addMenuRef.current.contains(target)) {
+        setShowAddMenu(false);
+      }
+      if (shapeMenuRef.current && !shapeMenuRef.current.contains(target)) {
+        setShowShapeMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
-        // 处理“新增”菜单关闭
-        if (showAddMenu && !addMenuRef.current?.contains(target) && !addButtonRef.current?.contains(target)) {
-            setShowAddMenu(false)
-        }
-
-        // 处理“图形”菜单关闭
-        if (showShapeMenu && !shapeMenuRef.current?.contains(target) && !shapeButtonRef.current?.contains(target)) {
-            setShowShapeMenu(false)
-        }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showAddMenu, showShapeMenu])
-
-  // 图片上传逻辑 (保持不变)
-  const handleUploadImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files || files.length === 0 || !editor) return
-
-    const readImage = (file: File): Promise<{ src: string, w: number, h: number, name: string, type: string }> => {
-        return new Promise((resolve) => {
-            const reader = new FileReader()
-            reader.onload = () => {
-                const src = reader.result as string
-                const img = new window.Image()
-                img.onload = () => resolve({ src, w: img.width, h: img.height, name: file.name, type: file.type })
-                img.src = src
-            }
-            reader.readAsDataURL(file)
-        })
-    }
-
-    try {
-        const imageInfos = await Promise.all(Array.from(files).map(readImage))
-        const gap = 50
-        const totalNewWidth = imageInfos.reduce((sum, img) => sum + img.w, 0) + (imageInfos.length - 1) * gap
-        
-        const existingShapeIds = editor.getCurrentPageShapeIds()
-        let startX = 0, centerY = 0
-        
-        if (existingShapeIds.size > 0) {
-            let maxX = -Infinity, minY = Infinity, maxY = -Infinity
-            let hasBounds = false
-            for (const id of existingShapeIds) {
-                const bounds = editor.getShapePageBounds(id)
-                if (bounds) {
-                    hasBounds = true
-                    if (bounds.maxX > maxX) maxX = bounds.maxX
-                    if (bounds.minY < minY) minY = bounds.minY
-                    if (bounds.maxY > maxY) maxY = bounds.maxY
-                }
-            }
-            if (hasBounds) {
-                startX = maxX + 200
-                centerY = minY + (maxY - minY) / 2
-            }
-        } 
-        
-        if (startX === 0) {
-            const vp = editor.getViewportPageBounds()
-            startX = vp.center.x - totalNewWidth / 2
-            centerY = vp.center.y
-        }
-
-        const assetsToCreate: any[] = []
-        const shapesToCreate: any[] = []
-        const newShapeIds: any[] = []
-        
-        let currentX = startX
-
-        imageInfos.forEach((img) => {
-            const assetId = `asset:${Date.now()}-${Math.random()}`
-            const shapeId = createShapeId()
-            assetsToCreate.push({
-                id: assetId as any, type: 'image', typeName: 'asset',
-                props: { name: img.name, src: img.src, w: img.w, h: img.h, mimeType: img.type, isAnimated: false },
-                meta: {}
-            })
-            shapesToCreate.push({
-                id: shapeId, type: 'image', x: currentX, y: centerY - img.h / 2, 
-                props: { w: img.w, h: img.h, assetId: assetId as any },
-                meta: { name: img.name }
-            })
-            newShapeIds.push(shapeId)
-            currentX += img.w + gap
-        })
-
-        editor.createAssets(assetsToCreate)
-        editor.createShapes(shapesToCreate)
-        
-        if (newShapeIds.length > 0) {
-            editor.select(...newShapeIds)
-            const newBounds = editor.getSelectionPageBounds()
-            if (newBounds) editor.zoomToBounds(newBounds, { inset: 0.2, animation: { duration: 500 } })
-        }
-    } catch (err) { console.error(err) }
-
-    setShowAddMenu(false)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  // 快捷键监听
+  // A 键占位
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-        if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return
-        if (e.key.toLowerCase() === 'a' && !e.ctrlKey && !e.metaKey) {
-            console.log('AI Triggered')
-        }
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        (e.target as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+      if (e.key.toLowerCase() === "a") {
+        alert("AI 图像功能即将上线（占位）");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const ToolButton = ({
+    active,
+    onClick,
+    children,
+    title,
+  }: {
+    active?: boolean;
+    onClick: () => void;
+    children: React.ReactNode;
+    title?: string;
+  }) => (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      style={{
+        width: 44,
+        height: 44,
+        borderRadius: 16,
+        border: "none",
+        outline: "none",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        margin: "4px 0",
+        cursor: "pointer",
+        background: active ? "#eef2ff" : "transparent",
+        color: active ? "#4f46e5" : "#64748b",
+        transition: "all 0.15s ease",
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = "#f8fafc";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      {children}
+    </button>
+  );
+
+  // 图片读取
+  const readImageFile = (file: File): Promise<UploadedImageInfo> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          resolve({
+            src: reader.result as string,
+            w: img.width,
+            h: img.height,
+            name: file.name,
+            type: file.type,
+          });
+        };
+        img.onerror = reject;
+        img.src = reader.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  // 上传图片功能
+  const handleUploadImage = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+
+    const images = await Promise.all(files.map(readImageFile));
+    const spacing = 40;
+
+    // 1. 计算放置位置：优先放在当前视图中心，而不是整个页面的中心
+    const viewport = editor.getViewportPageBounds();
+    let startX: number;
+    let centerY: number;
+
+    // 如果想放在已有内容右侧，保留原逻辑；
+    // 但通常用户更喜欢把图片放在"眼皮底下"（当前视图中心）
+    // 为了稳妥，这里还是保留你的"放在最右侧"逻辑，但确保基于页面边界计算正确
+    const pageBounds = editor.getCurrentPageBounds();
+    if (pageBounds) {
+      startX = pageBounds.maxX + 100; // 稍微多留点空隙
+      centerY = (pageBounds.minY + pageBounds.maxY) / 2;
+    } else {
+      startX = viewport.center.x;
+      centerY = viewport.center.y;
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+
+    const assets: any[] = [];
+    const shapes: any[] = [];
+    const newShapeIds: string[] = [];
+
+    let currentX = startX;
+
+    for (const img of images) {
+      const assetId = `asset:${Date.now()}-${Math.random()}`;
+      const shapeId = createShapeId();
+
+      assets.push({
+        id: assetId as any,
+        type: "image",
+        typeName: "asset",
+        props: {
+          name: img.name,
+          src: img.src,
+          w: img.w,
+          h: img.h,
+          mimeType: img.type,
+          isAnimated: false,
+        },
+        meta: {},
+      });
+
+      shapes.push({
+        id: shapeId,
+        type: "image",
+        x: currentX,
+        y: centerY - img.h / 2,
+        props: {
+          w: img.w,
+          h: img.h,
+          assetId: assetId as any,
+        },
+      });
+
+      newShapeIds.push(shapeId);
+      currentX += img.w + spacing;
+    }
+
+    // 2. 批量创建
+    editor.createAssets(assets as any);
+    editor.createShapes(shapes as any);
+    
+    // 3. 选中新图片
+    editor.select(...newShapeIds);
+
+    // ⭐ 关键修改：使用 setTimeout 强制等待 React/Tldraw 渲染循环完成
+    // 之前不准确是因为图形刚创建，编辑器的“空间索引”还没更新，不知道它们在哪
+    setTimeout(() => {
+      editor.zoomToSelection({
+        animation: { duration: 400 }, // 动画时间
+        inset: 0.2, // 留白比例 (20%)，防止图片贴着屏幕边缘
+      });
+    }, 100); // 100ms 的延迟通常足以解决所有竞态条件
+
+    e.target.value = "";
+    setShowAddMenu(false);
+  };
+
+  const MenuItem = ({
+    icon,
+    label,
+    shortcut,
+    onClick,
+    highlight,
+  }: {
+    icon: React.ReactNode;
+    label: string;
+    shortcut?: string;
+    onClick: () => void;
+    highlight?: boolean;
+  }) => (
+    <div
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 10px",
+        fontSize: 13,
+        cursor: "pointer",
+        color: highlight ? "#4f46e5" : "#0f172a",
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+    >
+      <div style={{ display: "flex", alignItems: "center", color: highlight ? "#4f46e5" : "#64748b" }}>
+        {icon}
+      </div>
+      <span style={{ flex: 1 }}>{label}</span>
+      {shortcut && (
+        <span
+          style={{
+            fontSize: 11,
+            color: "#94a3b8",
+            borderRadius: 4,
+            border: "1px solid #e2e8f0",
+            padding: "2px 6px",
+          }}
+        >
+          {shortcut}
+        </span>
+      )}
+    </div>
+  );
 
   return (
-    <div style={{
-      position: 'absolute', top: '50%', 
-      left: isSidebarOpen ? 260 : 20, 
-      transform: 'translateY(-50%)',
-      display: 'flex', flexDirection: 'column', gap: 12, zIndex: 200, pointerEvents: 'all',
-      transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
-    }}>
-      <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*" multiple onChange={handleUploadImage}/>
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        style={{ display: "none" }}
+        onChange={handleUploadImage}
+      />
 
-      <div style={{
-        background: 'white', padding: 8, borderRadius: 16,
-        boxShadow: '0 2px 12px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.02)', 
-        display: 'flex', flexDirection: 'column', gap: 6
-      }}>
-        
-        {/* 1. 选择工具 */}
-        <ToolBtn 
-            id="select"
-            icon={<MousePointer2 size={20} />} 
-            label="选择 (V)" 
-            isActive={currentTool === 'select'}
-            onClick={() => editor.setCurrentTool('select')}
-        />
-
-        {/* 2. 图形工具 (带下拉菜单) */}
-        <div style={{ position: 'relative' }}>
-            <button
-                ref={shapeButtonRef}
-                onClick={() => setShowShapeMenu(!showShapeMenu)}
-                title="形状工具"
-                style={{
-                    padding: 10, borderRadius: 10, border: 'none', cursor: 'pointer',
-                    background: (currentTool === 'geo' || currentTool === 'arrow' || currentTool === 'line') ? '#eff6ff' : 'transparent',
-                    color: (currentTool === 'geo' || currentTool === 'arrow' || currentTool === 'line') ? '#2563eb' : '#64748b',
-                    transition: 'all 0.2s', width: '100%', display: 'flex', justifyContent: 'center'
-                }}
-            >
-                {/* 根据当前选中的形状显示不同图标 */}
-                <Square size={20} />
-            </button>
-
-            {/* 图形下拉菜单 */}
-            {showShapeMenu && (
-                <div 
-                    ref={shapeMenuRef}
-                    style={{
-                        position: 'absolute', left: '140%', top: -20, width: 140,
-                        background: 'white', borderRadius: 12, padding: '6px 0',
-                        boxShadow: '0 10px 40px -10px rgba(0,0,0,0.2)',
-                        display: 'flex', flexDirection: 'column', gap: 2,
-                        animation: 'slideIn 0.15s ease-out'
-                    }}
-                >
-                    <MenuItem icon={<Square size={16} />} label="矩形" onClick={() => handleSelectShape('geo', 'rectangle')} />
-                    <MenuItem icon={<Circle size={16} />} label="圆形" onClick={() => handleSelectShape('geo', 'ellipse')} />
-                    <MenuItem icon={<Triangle size={16} />} label="三角形" onClick={() => handleSelectShape('geo', 'triangle')} />
-                    <div style={{ height: 1, background: '#f1f5f9', margin: '2px 8px' }} />
-                    <MenuItem icon={<ArrowRight size={16} />} label="箭头" onClick={() => handleSelectShape('arrow')} />
-                    <MenuItem icon={<Minus size={16} />} label="线条" onClick={() => handleSelectShape('line')} />
-                </div>
-            )}
-        </div>
-
-        {/* 3. 文字工具 */}
-        <ToolBtn 
-            id="text"
-            icon={<Type size={20} />} 
-            label="文字 (T)" 
-            isActive={currentTool === 'text'}
-            onClick={() => editor.setCurrentTool('text')}
-        />
-
-        {/* 4. 画笔工具 */}
-        <ToolBtn 
-            id="draw"
-            icon={<Pen size={20} />} 
-            label="画笔 (P)" 
-            isActive={currentTool === 'draw'}
-            onClick={() => editor.setCurrentTool('draw')}
-        />
-
-        <div style={{ height: 1, background: '#f1f5f9', margin: '2px 8px' }} />
-
-        {/* 5. 新增菜单 (保持不变) */}
-        <div style={{ position: 'relative' }}>
-          <button
-            ref={addButtonRef}
-            onClick={() => setShowAddMenu(!showAddMenu)}
-            style={{
-              padding: 10, borderRadius: 10, border: 'none', cursor: 'pointer',
-              background: showAddMenu ? '#eff6ff' : 'transparent', 
-              color: showAddMenu ? '#2563eb' : '#64748b',
-              width: '100%', display: 'flex', justifyContent: 'center',
-              transition: 'all 0.2s'
-            }}
+      {/* ⭐ 左侧主工具栏 - 自动视觉居中 */}
+      <div
+        style={{
+          position: "absolute",
+          top: "50%", // 改成这个，强制垂直居中
+          transform: "translateY(-50%)", // 配合这个属性，达成完美的中心对齐
+          left: isSidebarOpen ? 40 : 24,
+          zIndex: 200,
+          pointerEvents: "all",
+        }}
+      >
+        <div
+          style={{
+            width: 56,
+            padding: "8px 6px",
+            borderRadius: 24,
+            background: "white",
+            boxShadow: "0 18px 40px rgba(15,23,42,0.12)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+          }}
+        >
+          <ToolButton
+            active={currentToolId === "select"}
+            title="选择工具 (V)"
+            onClick={() => editor.setCurrentTool("select")}
           >
-            <Plus size={22} />
-          </button>
+            <MousePointer2 size={20} />
+          </ToolButton>
 
-          {showAddMenu && (
-            <div 
-              ref={addMenuRef}
-              style={{
-                position: 'absolute', left: '140%', top: -80, width: 220, 
-                background: 'white', borderRadius: 16, padding: '8px 0', 
-                boxShadow: '0 10px 40px -10px rgba(0,0,0,0.2)',
-                display: 'flex', flexDirection: 'column', gap: 2,
-                animation: 'slideIn 0.15s ease-out'
-              }}
+          <ToolButton
+            active={currentToolId === "hand"}
+            title="抓手工具 (H / 空格)"
+            onClick={() => editor.setCurrentTool("hand")}
+          >
+            <Hand size={20} />
+          </ToolButton>
+
+          {/* 图形菜单 */}
+          <div style={{ position: "relative", width: "100%" }}>
+            <ToolButton
+              active={
+                currentToolId === "geo" ||
+                currentToolId === "arrow" ||
+                currentToolId === "line"
+              }
+              title="图形工具"
+              onClick={() => setShowShapeMenu((v) => !v)}
             >
-              <div style={groupTitleStyle}>新增</div>
-              <MenuItem icon={<ImageIcon size={18} />} label="上传图片" onClick={() => fileInputRef.current?.click()} />
-              <MenuItem icon={<Video size={18} />} label="上传视频" onClick={() => alert('视频功能开发中...')} />
-              <div style={{ height: 1, background: '#f1f5f9', margin: '4px 12px' }} />
-              <div style={groupTitleStyle}>AI 创意</div>
-              <MenuItem icon={<Wand2 size={18} />} label="图像生成器" shortcut="A" onClick={() => alert('AI 功能即将上线')} highlight />
-              <div style={{ height: 1, background: '#f1f5f9', margin: '4px 12px' }} />
-              <MenuItem icon={<LayoutGrid size={18} />} label="智能画板" shortcut="F" onClick={() => alert('智能画板')} />
-            </div>
-          )}
+              <Square size={20} />
+            </ToolButton>
+
+            {showShapeMenu && (
+              <div
+                ref={shapeMenuRef}
+                style={{
+                  position: "absolute",
+                  left: 64,
+                  top: -10,
+                  width: 170,
+                  background: "white",
+                  borderRadius: 16,
+                  padding: "6px 0",
+                  boxShadow: "0 18px 40px rgba(15,23,42,0.18)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                  zIndex: 300,
+                }}
+              >
+                <MenuItem
+                  icon={<Square size={16} />}
+                  label="矩形"
+                  onClick={() => {
+                    editor.setStyleForNextShapes(GeoShapeGeoStyle, "rectangle");
+                    editor.setCurrentTool("geo");
+                    setShowShapeMenu(false);
+                  }}
+                  highlight={geoShapeStyle === "rectangle"}
+                />
+
+                <MenuItem
+                  icon={<Circle size={16} />}
+                  label="圆形"
+                  onClick={() => {
+                    editor.setStyleForNextShapes(GeoShapeGeoStyle, "ellipse");
+                    editor.setCurrentTool("geo");
+                    setShowShapeMenu(false);
+                  }}
+                  highlight={geoShapeStyle === "ellipse"}
+                />
+
+                <MenuItem
+                  icon={<Triangle size={16} />}
+                  label="三角形"
+                  onClick={() => {
+                    editor.setStyleForNextShapes(GeoShapeGeoStyle, "triangle");
+                    editor.setCurrentTool("geo");
+                    setShowShapeMenu(false);
+                  }}
+                  highlight={geoShapeStyle === "triangle"}
+                />
+
+                <div
+                  style={{
+                    height: 1,
+                    margin: "4px 8px",
+                    background: "#e2e8f0",
+                  }}
+                />
+
+                <MenuItem
+                  icon={<ArrowRight size={16} />}
+                  label="箭头"
+                  onClick={() => {
+                    editor.setCurrentTool("arrow");
+                    setShowShapeMenu(false);
+                  }}
+                  highlight={currentToolId === "arrow"}
+                />
+
+                <MenuItem
+                  icon={<Minus size={16} />}
+                  label="直线"
+                  onClick={() => {
+                    editor.setCurrentTool("line");
+                    setShowShapeMenu(false);
+                  }}
+                  highlight={currentToolId === "line"}
+                />
+              </div>
+            )}
+          </div>
+
+          <ToolButton
+            active={currentToolId === "text"}
+            title="文本工具 (T)"
+            onClick={() => editor.setCurrentTool("text")}
+          >
+            <Type size={20} />
+          </ToolButton>
+
+          <ToolButton
+            active={currentToolId === "draw"}
+            title="画笔工具 (B)"
+            onClick={() => editor.setCurrentTool("draw")}
+          >
+            <Pen size={20} />
+          </ToolButton>
+
+          <div
+            style={{
+              width: "60%",
+              height: 1,
+              margin: "8px 0",
+              background: "#e2e8f0",
+            }}
+          />
+
+          <div style={{ position: "relative", width: "100%" }}>
+            <ToolButton title="添加内容" onClick={() => setShowAddMenu((v) => !v)}>
+              <Plus size={20} />
+            </ToolButton>
+
+            {showAddMenu && (
+              <div
+                ref={addMenuRef}
+                style={{
+                  position: "absolute",
+                  left: 64,
+                  top: -40,
+                  width: 220,
+                  background: "white",
+                  borderRadius: 16,
+                  padding: "8px 0",
+                  boxShadow: "0 18px 40px rgba(15,23,42,0.18)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                  zIndex: 300,
+                }}
+              >
+                <MenuItem
+                  icon={<ImageIcon size={18} />}
+                  label="上传图片"
+                  onClick={() => fileInputRef.current?.click()}
+                  shortcut="Ctrl+U"
+                />
+
+                <MenuItem
+                  icon={<Video size={18} />}
+                  label="上传视频（开发中）"
+                  onClick={() => {
+                    alert("视频上传功能开发中");
+                    setShowAddMenu(false);
+                  }}
+                />
+
+                <div
+                  style={{
+                    height: 1,
+                    margin: "4px 8px",
+                    background: "#e2e8f0",
+                  }}
+                />
+
+                <MenuItem
+                  icon={
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <Wand2 size={18} />
+                      <ChevronRight size={16} />
+                    </div>
+                  }
+                  label="AI 图像生成器"
+                  shortcut="A"
+                  onClick={() => {
+                    alert("AI 图像功能即将上线");
+                    setShowAddMenu(false);
+                  }}
+                  highlight
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
-      <style>{`
-        @keyframes slideIn {
-            from { opacity: 0; transform: translateX(-10px); }
-            to { opacity: 1; transform: translateX(0); }
-        }
-      `}</style>
-    </div>
-  )
-}
-
-// --- 样式与子组件 ---
-
-const ToolBtn = ({ icon, label, isActive, onClick }: any) => (
-    <button
-        onClick={onClick}
-        title={label}
-        style={{
-            padding: 10, borderRadius: 10, border: 'none', cursor: 'pointer',
-            background: isActive ? '#eff6ff' : 'transparent', 
-            color: isActive ? '#2563eb' : '#64748b',
-            transition: 'all 0.2s'
-        }}
-    >
-        {icon}
-    </button>
-)
-
-const groupTitleStyle: React.CSSProperties = {
-    fontSize: 12, color: '#94a3b8', padding: '8px 16px 4px', fontWeight: 500
-}
-
-const MenuItem = ({ icon, label, shortcut, onClick, highlight }: any) => (
-  <div 
-    onClick={onClick}
-    style={{
-        display: 'flex', alignItems: 'center', gap: 12, 
-        padding: '10px 16px', margin: '0 4px', borderRadius: 8,
-        cursor: 'pointer', fontSize: 14, color: '#334155',
-        transition: 'background 0.15s',
-        background: 'transparent'
-    }}
-    onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
-    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-  >
-    <div style={{ color: highlight ? '#7c3aed' : '#64748b', display: 'flex', alignItems: 'center' }}>
-        {icon}
-    </div>
-    <span style={{ flex: 1, fontWeight: 400 }}>{label}</span>
-    {shortcut && (
-        <span style={{ fontSize: 12, color: '#cbd5e1', fontWeight: 500, background: '#fff', border: '1px solid #e2e8f0', padding: '2px 6px', borderRadius: 4 }}>
-            {shortcut}
-        </span>
-    )}
-  </div>
-)
+    </>
+  );
+};
